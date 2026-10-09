@@ -58,6 +58,7 @@ public class LiveActivitiesPlugin: CAPPlugin, CAPBridgedPlugin {
         // can launch activities even before the app calls start().
         if #available(iOS 16.2, *) {
             LiveActivityManager.shared.startObservingPushToStartToken()
+            LiveActivityManager.shared.startObservingActivities()
         }
     }
 

@@ -5,130 +5,6 @@ import ActivityKit
 #endif
 
 // ---------------------------------------------------------------------------
-// Generic JSON-driven ActivityAttributes
-// ---------------------------------------------------------------------------
-// Both the plugin and the companion Widget Extension share this type so they
-// can exchange data through the shared App Group without any custom codegen.
-
-@available(iOS 16.2, *)
-public struct LiveActivityAttributes: ActivityAttributes {
-    public struct ContentState: Codable, Hashable {
-        public var title: String
-        public var subtitle: String?
-        public var progress: Double?
-        public var icon: String?
-        /// When set, the widget renders a live countdown using SwiftUI's
-        /// timerInterval — no repeated update() calls needed from JS.
-        public var timerEnd: Date?
-        /// Start of the timer interval. Used to compute the progress ring fill.
-        /// Defaults to the moment start() was called if omitted.
-        public var timerStart: Date?
-        /// Direction of the timer bar/ring. true = drain (default), false = fill.
-        public var timerCountsDown: Bool?
-        /// Hex color string for the activity background tint (e.g. "1a1a2e" or "#1a1a2e").
-        public var backgroundColor: String?
-        /// Hex color string for progress bars, rings and timer bar. Defaults to white.
-        public var progressColor: String?
-        /// Hex color string for title and subtitle text. Defaults to white.
-        public var textColor: String?
-        /// Hex color string for the SF Symbol icon. Defaults to white.
-        public var iconColor: String?
-        /// Hex color string for the expanded Dynamic Island keyline outline.
-        public var keylineTint: String?
-        /// Thickness in points of the linear progress bar (2–20).
-        public var progressBarHeight: Double?
-        /// Corner radius in points of the linear progress bar.
-        public var progressBarRadius: Double?
-        public var extras: [String: AnyCodable]
-
-        public init(
-            title: String,
-            subtitle: String? = nil,
-            progress: Double? = nil,
-            icon: String? = nil,
-            timerEnd: Date? = nil,
-            timerStart: Date? = nil,
-            timerCountsDown: Bool? = nil,
-            backgroundColor: String? = nil,
-            progressColor: String? = nil,
-            textColor: String? = nil,
-            iconColor: String? = nil,
-            keylineTint: String? = nil,
-            progressBarHeight: Double? = nil,
-            progressBarRadius: Double? = nil,
-            extras: [String: AnyCodable] = [:]
-        ) {
-            self.title = title
-            self.subtitle = subtitle
-            self.progress = progress
-            self.icon = icon
-            self.timerEnd = timerEnd
-            self.timerStart = timerStart
-            self.timerCountsDown = timerCountsDown
-            self.backgroundColor = backgroundColor
-            self.progressColor = progressColor
-            self.textColor = textColor
-            self.iconColor = iconColor
-            self.keylineTint = keylineTint
-            self.progressBarHeight = progressBarHeight
-            self.progressBarRadius = progressBarRadius
-            self.extras = extras
-        }
-    }
-
-    public var activityType: String
-    public var staticData: [String: AnyCodable]
-
-    public init(activityType: String, staticData: [String: AnyCodable] = [:]) {
-        self.activityType = activityType
-        self.staticData = staticData
-    }
-}
-
-// ---------------------------------------------------------------------------
-// AnyCodable — lightweight wrapper so we can store arbitrary JSON in Codable
-// ---------------------------------------------------------------------------
-
-public struct AnyCodable: Codable, Hashable {
-    public let value: Any
-
-    public init(_ value: Any) { self.value = value }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        if let v = try? container.decode(Bool.self)   { value = v; return }
-        if let v = try? container.decode(Int.self)    { value = v; return }
-        if let v = try? container.decode(Double.self) { value = v; return }
-        if let v = try? container.decode(String.self) { value = v; return }
-        if let v = try? container.decode([String: AnyCodable].self) { value = v; return }
-        if let v = try? container.decode([AnyCodable].self) { value = v; return }
-        value = NSNull()
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var container = encoder.singleValueContainer()
-        switch value {
-        case let v as Bool:                    try container.encode(v)
-        case let v as Int:                     try container.encode(v)
-        case let v as Double:                  try container.encode(v)
-        case let v as String:                  try container.encode(v)
-        case let v as [String: AnyCodable]:    try container.encode(v)
-        case let v as [AnyCodable]:            try container.encode(v)
-        default:                               try container.encodeNil()
-        }
-    }
-
-    public static func == (lhs: AnyCodable, rhs: AnyCodable) -> Bool {
-        // Simple equality for Hashable conformance
-        "\(lhs.value)" == "\(rhs.value)"
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine("\(value)")
-    }
-}
-
-// ---------------------------------------------------------------------------
 // LiveActivityManager
 // ---------------------------------------------------------------------------
 
@@ -140,6 +16,8 @@ public class LiveActivityManager {
 
     // activityId → Activity<LiveActivityAttributes>
     private var activities: [String: Activity<LiveActivityAttributes>] = [:]
+    private let lock = NSLock()
+    private var isObservingActivities = false
 
     // Latest push-to-start token (iOS 17.2+), cached as it rotates.
     private var pushToStartToken: String?
@@ -182,6 +60,75 @@ public class LiveActivityManager {
         pushToStartToken
     }
 
+    // MARK: - Activity tracking
+
+    /// Adopts activities that survived an app relaunch and ones started remotely
+    /// via push-to-start, so update()/end()/getPushToken() and token events
+    /// work for them too. Call once at app launch.
+    func startObservingActivities() {
+        guard !isObservingActivities else { return }
+        isObservingActivities = true
+
+        Activity<LiveActivityAttributes>.activities.forEach { track($0) }
+        Task {
+            for await activity in Activity<LiveActivityAttributes>.activityUpdates {
+                self.track(activity)
+            }
+        }
+    }
+
+    private func activity(for id: String) -> Activity<LiveActivityAttributes>? {
+        lock.lock(); defer { lock.unlock() }
+        return activities[id] ?? Activity<LiveActivityAttributes>.activities.first { $0.id == id }
+    }
+
+    private func forget(_ id: String) {
+        lock.lock(); defer { lock.unlock() }
+        activities.removeValue(forKey: id)
+    }
+
+    private func track(_ activity: Activity<LiveActivityAttributes>) {
+        let activityId = activity.id
+        lock.lock()
+        let isNew = activities[activityId] == nil
+        activities[activityId] = activity
+        lock.unlock()
+        guard isNew else { return }
+
+        // Observe state changes and forward them as Capacitor events
+        Task {
+            for await stateUpdate in activity.activityStateUpdates {
+                NotificationCenter.default.post(
+                    name: .liveActivityStateChanged,
+                    object: nil,
+                    userInfo: [
+                        "activityId": activityId,
+                        "activityState": stateUpdate.rawStateString
+                    ]
+                )
+                if stateUpdate == .ended || stateUpdate == .dismissed {
+                    self.forget(activityId)
+                }
+            }
+        }
+
+        // Observe push token changes (issued on first request, may rotate)
+        Task {
+            for await tokenData in activity.pushTokenUpdates {
+                let token = tokenData.map { String(format: "%02x", $0) }.joined()
+                NotificationCenter.default.post(
+                    name: .liveActivityPushTokenUpdated,
+                    object: nil,
+                    userInfo: [
+                        "activityId": activityId,
+                        "token": token,
+                        "type": "apns"
+                    ]
+                )
+            }
+        }
+    }
+
     // MARK: - areActivitiesEnabled
 
     func areActivitiesEnabled() -> Bool {
@@ -216,46 +163,15 @@ public class LiveActivityManager {
             staleDate = Date().addingTimeInterval(seconds)
         }
 
+        // pushType .token makes ActivityKit issue a per-activity APNs token for server updates.
         let activity = try Activity<LiveActivityAttributes>.request(
             attributes: activityAttributes,
-            contentState: contentState,
-            pushType: nil
+            content: ActivityContent(state: contentState, staleDate: staleDate),
+            pushType: .token
         )
 
-        let activityId = activity.id
-        activities[activityId] = activity
-
-        // Observe state changes and forward them as Capacitor events
-        Task {
-            for await stateUpdate in activity.activityStateUpdates {
-                NotificationCenter.default.post(
-                    name: .liveActivityStateChanged,
-                    object: nil,
-                    userInfo: [
-                        "activityId": activityId,
-                        "activityState": stateUpdate.rawStateString
-                    ]
-                )
-            }
-        }
-
-        // Observe push token changes (issued on first request, may rotate)
-        Task {
-            for await tokenData in activity.pushTokenUpdates {
-                let token = tokenData.map { String(format: "%02x", $0) }.joined()
-                NotificationCenter.default.post(
-                    name: .liveActivityPushTokenUpdated,
-                    object: nil,
-                    userInfo: [
-                        "activityId": activityId,
-                        "token": token,
-                        "type": "apns"
-                    ]
-                )
-            }
-        }
-
-        return activityId
+        track(activity)
+        return activity.id
     }
 
     // MARK: - update
@@ -266,7 +182,7 @@ public class LiveActivityManager {
         alertTitle: String?,
         alertBody: String?
     ) async throws {
-        guard let activity = activities[activityId] else {
+        guard let activity = activity(for: activityId) else {
             throw LiveActivityError.activityNotFound(activityId)
         }
 
@@ -297,7 +213,7 @@ public class LiveActivityManager {
         finalState: [String: Any]?,
         dismissalPolicy: String?
     ) async throws {
-        guard let activity = activities[activityId] else {
+        guard let activity = activity(for: activityId) else {
             throw LiveActivityError.activityNotFound(activityId)
         }
 
@@ -318,13 +234,13 @@ public class LiveActivityManager {
             await activity.end(dismissalPolicy: policy)
         }
 
-        activities.removeValue(forKey: activityId)
+        forget(activityId)
     }
 
     // MARK: - getPushToken
 
     func getPushToken(activityId: String) -> String? {
-        guard let activity = activities[activityId] else { return nil }
+        guard let activity = activity(for: activityId) else { return nil }
         guard let tokenData = activity.pushToken else { return nil }
         return tokenData.map { String(format: "%02x", $0) }.joined()
     }
@@ -333,11 +249,15 @@ public class LiveActivityManager {
 
     func getActiveActivities() -> [[String: String]] {
         Activity<LiveActivityAttributes>.activities.map { activity in
-            [
+            var info = [
                 "activityId": activity.id,
                 "activityType": activity.attributes.activityType,
                 "state": activity.activityState.rawStateString
             ]
+            if let tokenData = activity.pushToken {
+                info["pushToken"] = tokenData.map { String(format: "%02x", $0) }.joined()
+            }
+            return info
         }
     }
 
