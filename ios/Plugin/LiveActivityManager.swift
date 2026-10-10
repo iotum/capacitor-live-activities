@@ -286,7 +286,7 @@ public class LiveActivityManager {
             "title", "subtitle", "progress", "icon",
             "timerEnd", "timerStart", "timerCountsDown",
             "backgroundColor", "progressColor", "textColor", "iconColor",
-            "keylineTint", "progressBarHeight", "progressBarRadius"
+            "keylineTint", "progressBarHeight", "progressBarRadius", "display"
         ]
         for (k, v) in dict where !reserved.contains(k) {
             extras[k] = AnyCodable(v)
@@ -297,6 +297,14 @@ public class LiveActivityManager {
         var timerStart: Date? = nil
         if let ts = dict["timerEnd"] as? Double { timerEnd = Date(timeIntervalSince1970: ts) }
         if let ts = dict["timerStart"] as? Double { timerStart = Date(timeIntervalSince1970: ts) }
+
+        var display: LiveActivityDisplay? = nil
+        if let data = dict["display"], !(data is NSNull) {
+            display = try JSONDecoder().decode(
+                LiveActivityDisplay.self,
+                from: JSONSerialization.data(withJSONObject: data)
+            )
+        }
 
         return LiveActivityAttributes.ContentState(
             title: title,
@@ -313,6 +321,7 @@ public class LiveActivityManager {
             keylineTint: dict["keylineTint"] as? String,
             progressBarHeight: dict["progressBarHeight"] as? Double,
             progressBarRadius: dict["progressBarRadius"] as? Double,
+            display: display,
             extras: extras
         )
     }

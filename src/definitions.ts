@@ -14,9 +14,30 @@ export interface LiveActivityAttributes {
 /**
  * Dynamic data for a Live Activity — can be pushed via `update()` at any time.
  */
+export interface LiveActivityDisplay {
+  version: 1;
+  status?: string;
+  url?: string;
+  sections: {
+    id: string;
+    title?: string;
+    items: {
+      id: string;
+      label: string;
+      value?: string;
+      badge?: string;
+      selected?: boolean;
+      url?: string;
+    }[];
+  }[];
+  actions: { id: string; label: string; icon?: string; url: string }[];
+}
+
 export interface LiveActivityState {
   /** Primary headline shown on the Lock Screen / Dynamic Island. */
   title: string;
+  /** iOS widget display contract. Requires the supplied widget template in the host extension. */
+  display?: LiveActivityDisplay;
   /** Secondary line of text. */
   subtitle?: string;
   /** Optional progress value between 0.0 and 1.0. */
@@ -259,9 +280,7 @@ export interface LiveActivitiesPlugin {
    */
   addListener(
     eventName: 'activityStateChanged' | 'pushTokenUpdated' | 'pushToStartTokenUpdated',
-    listenerFunc: (
-      event: ActivityStateChangedEvent | PushTokenUpdatedEvent | PushToStartTokenUpdatedEvent,
-    ) => void,
+    listenerFunc: (event: ActivityStateChangedEvent | PushTokenUpdatedEvent | PushToStartTokenUpdatedEvent) => void,
   ): Promise<PluginListenerHandle>;
 
   removeAllListeners(): Promise<void>;

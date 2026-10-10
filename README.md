@@ -544,6 +544,63 @@ Your app should handle the incoming FCM data message (via a Firebase `onMessageR
 
 ## Customising the iOS Widget UI
 
+### Structured display data
+
+Copy `ios/Widget/LiveActivityWidget.swift` into the host app's Widget Extension,
+replacing its generated widget and widget bundle. Include
+`ios/Plugin/LiveActivityAttributes.swift` in both targets. The plugin alone cannot
+install a widget extension. Rebuild and install the app to enable this layout.
+
+The optional `display` contract is domain-independent. Send labels and formatted
+values, not CRM-specific rendering instructions. Item and section ids must be
+stable across updates; array order determines display priority.
+
+```json
+{
+  "title": "Jane Example",
+  "subtitle": "Example Industries",
+  "icon": "phone.fill",
+  "display": {
+    "version": 1,
+    "url": "https://app.example.com/app/call/example",
+    "sections": [
+      { "id": "matches", "title": "Matches", "items": [
+        { "id": "hubspot", "label": "Jane Example", "badge": "HS", "selected": true },
+        { "id": "connectwise", "label": "Jane Example", "badge": "CW" }
+      ] },
+      { "id": "metrics", "title": "Metrics", "items": [
+        { "id": "open_tickets", "label": "Open tickets", "value": "3" },
+        { "id": "account_tier", "label": "Account", "value": "Gold" }
+      ] }
+    ],
+    "actions": [
+      { "id": "create_ticket", "label": "New ticket", "icon": "plus", "url": "https://app.example.com/app/call/example?action=create_ticket" }
+    ]
+  }
+}
+```
+
+For APNs, put `display` directly inside `aps.content-state`, not inside `extras`.
+App-driven `start` and `update` accept the same object inside `state`. Old states
+without `display` still decode. Always send the complete state, including both
+`sections` and `actions` (use empty arrays when absent).
+
+The template shows at most two sections, six pills on the Lock Screen (fewer
+when space is tight), four in the expanded Dynamic Island, and two action links.
+Remaining items open in the app through `display.url`; send all ordered items
+only when the complete ActivityKit payload fits its 4 KB budget. Compact/minimal
+presentations show an icon and status/timer, not pills. `display.status` overrides
+the timer, for example `Ended · 02:34` supplied by the server. Links accept HTTP(S);
+configure universal links in the host app for in-app routing. Missing-value pills
+can use their source `display` string verbatim, including an em dash.
+
+Rails can map matches to `{id, label: displayName, badge: crm.monogram, selected}`
+and metrics to `{id: key, label, value: display}`. It should keep customer order,
+preserve stable ids, and replace the complete display on each context update.
+
+This template currently targets iPhone Lock Screen and Dynamic Island. Apple
+Watch layouts and Android structured-display rendering are not included.
+
 The default widget renders **icon · title · subtitle · progress bar** using a dark frosted background. To customise it:
 
 1. Open `LiveActivityWidget.swift` in your Widget Extension target.

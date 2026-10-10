@@ -39,6 +39,7 @@ public struct LiveActivityAttributes: ActivityAttributes {
         public var progressBarHeight: Double?
         /// Corner radius in points of the linear progress bar.
         public var progressBarRadius: Double?
+        public var display: LiveActivityDisplay?
         public var extras: [String: AnyCodable]
 
         public init(
@@ -56,6 +57,7 @@ public struct LiveActivityAttributes: ActivityAttributes {
             keylineTint: String? = nil,
             progressBarHeight: Double? = nil,
             progressBarRadius: Double? = nil,
+            display: LiveActivityDisplay? = nil,
             extras: [String: AnyCodable] = [:]
         ) {
             self.title = title
@@ -72,6 +74,7 @@ public struct LiveActivityAttributes: ActivityAttributes {
             self.keylineTint = keylineTint
             self.progressBarHeight = progressBarHeight
             self.progressBarRadius = progressBarRadius
+            self.display = display
             self.extras = extras
         }
 
@@ -92,6 +95,7 @@ public struct LiveActivityAttributes: ActivityAttributes {
             keylineTint = try c.decodeIfPresent(String.self, forKey: .keylineTint)
             progressBarHeight = try c.decodeIfPresent(Double.self, forKey: .progressBarHeight)
             progressBarRadius = try c.decodeIfPresent(Double.self, forKey: .progressBarRadius)
+            display = try c.decodeIfPresent(LiveActivityDisplay.self, forKey: .display)
             extras = try c.decodeIfPresent([String: AnyCodable].self, forKey: .extras) ?? [:]
         }
     }
@@ -116,10 +120,49 @@ public struct LiveActivityAttributes: ActivityAttributes {
 // AnyCodable — lightweight wrapper so we can store arbitrary JSON in Codable
 // ---------------------------------------------------------------------------
 
+public struct LiveActivityDisplay: Codable, Hashable {
+    public var version: Int
+    public var status: String?
+    public var url: String?
+    public var sections: [Section]
+    public var actions: [Action]
+
+    public struct Section: Codable, Hashable, Identifiable {
+        public var id: String
+        public var title: String?
+        public var items: [Item]
+    }
+
+    public struct Item: Codable, Hashable, Identifiable {
+        public var id: String
+        public var label: String
+        public var value: String?
+        public var badge: String?
+        public var selected: Bool?
+        public var url: String?
+    }
+
+    public struct Action: Codable, Hashable, Identifiable {
+        public var id: String
+        public var label: String
+        public var icon: String?
+        public var url: String
+    }
+}
+
 public struct AnyCodable: Codable, Hashable {
     public let value: Any
 
-    public init(_ value: Any) { self.value = value }
+    public init(_ value: Any) {
+        switch value {
+        case let dictionary as [String: Any]:
+            self.value = dictionary.mapValues { AnyCodable($0) }
+        case let array as [Any]:
+            self.value = array.map { AnyCodable($0) }
+        default:
+            self.value = value
+        }
+    }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
