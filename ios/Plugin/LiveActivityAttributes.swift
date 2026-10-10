@@ -123,6 +123,8 @@ public struct LiveActivityAttributes: ActivityAttributes {
 public struct LiveActivityDisplay: Codable, Hashable {
     public var version: Int
     public var status: String?
+    /// When set, the Lock Screen renders the card layout with this small line above the title.
+    public var header: String?
     public var url: String?
     public var sections: [Section]
     public var actions: [Action]
@@ -139,6 +141,8 @@ public struct LiveActivityDisplay: Codable, Hashable {
         public var value: String?
         public var badge: String?
         public var selected: Bool?
+        /// Hex color for the pill tint and text.
+        public var color: String?
         public var url: String?
     }
 
@@ -146,6 +150,8 @@ public struct LiveActivityDisplay: Codable, Hashable {
         public var id: String
         public var label: String
         public var icon: String?
+        /// "primary" (filled green), "destructive" (tinted red) or default (neutral).
+        public var style: String?
         public var url: String
     }
 }

@@ -17,6 +17,8 @@ export interface LiveActivityAttributes {
 export interface LiveActivityDisplay {
   version: 1;
   status?: string;
+  /** Small line above the title; enables the card layout on the Lock Screen. */
+  header?: string;
   url?: string;
   sections: {
     id: string;
@@ -27,10 +29,19 @@ export interface LiveActivityDisplay {
       value?: string;
       badge?: string;
       selected?: boolean;
+      /** Hex color for the pill tint and text. */
+      color?: string;
       url?: string;
     }[];
   }[];
-  actions: { id: string; label: string; icon?: string; url: string }[];
+  actions: {
+    id: string;
+    label: string;
+    icon?: string;
+    /** `primary` = filled green, `destructive` = tinted red, otherwise neutral. */
+    style?: 'primary' | 'destructive' | 'default';
+    url: string;
+  }[];
 }
 
 export interface LiveActivityState {
