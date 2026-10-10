@@ -877,6 +877,7 @@ Dynamic data for a Live Activity — can be pushed via `update()` at any time.
 | **`activityId`**   | <code>string</code>                             |                                                                                |
 | **`activityType`** | <code>string</code>                             |                                                                                |
 | **`state`**        | <code>'active' \| 'ended' \| 'dismissed'</code> | 'active' \| 'ended' \| 'dismissed' — iOS only; Android always returns 'active' |
+| **`pushToken`**    | <code>string</code>                             | iOS only — per-activity APNs update token, once issued                         |
 
 
 #### PushTokenResult

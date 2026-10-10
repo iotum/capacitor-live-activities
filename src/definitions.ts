@@ -165,6 +165,8 @@ export interface ActivityInfo {
   activityType: string;
   /** 'active' | 'ended' | 'dismissed' — iOS only; Android always returns 'active' */
   state: 'active' | 'ended' | 'dismissed';
+  /** iOS only — per-activity APNs update token, once issued */
+  pushToken?: string;
 }
 
 export interface ActivityStateChangedEvent {

@@ -16,6 +16,8 @@ public class LiveActivityManager {
 
     // activityId → Activity<LiveActivityAttributes>
     private var activities: [String: Activity<LiveActivityAttributes>] = [:]
+    // activity.pushToken can stay nil (e.g. push-started activities) even after pushTokenUpdates emits.
+    private var pushTokens: [String: String] = [:]
     private let lock = NSLock()
     private var isObservingActivities = false
 
@@ -85,6 +87,15 @@ public class LiveActivityManager {
     private func forget(_ id: String) {
         lock.lock(); defer { lock.unlock() }
         activities.removeValue(forKey: id)
+        pushTokens.removeValue(forKey: id)
+    }
+
+    private func pushTokenString(for activity: Activity<LiveActivityAttributes>) -> String? {
+        if let tokenData = activity.pushToken {
+            return tokenData.map { String(format: "%02x", $0) }.joined()
+        }
+        lock.lock(); defer { lock.unlock() }
+        return pushTokens[activity.id]
     }
 
     private func track(_ activity: Activity<LiveActivityAttributes>) {
@@ -116,6 +127,10 @@ public class LiveActivityManager {
         Task {
             for await tokenData in activity.pushTokenUpdates {
                 let token = tokenData.map { String(format: "%02x", $0) }.joined()
+                self.lock.lock()
+                self.pushTokens[activityId] = token
+                self.lock.unlock()
+                NSLog("LiveActivityManager: push token updated for activity %@", activityId)
                 NotificationCenter.default.post(
                     name: .liveActivityPushTokenUpdated,
                     object: nil,
@@ -241,8 +256,7 @@ public class LiveActivityManager {
 
     func getPushToken(activityId: String) -> String? {
         guard let activity = activity(for: activityId) else { return nil }
-        guard let tokenData = activity.pushToken else { return nil }
-        return tokenData.map { String(format: "%02x", $0) }.joined()
+        return pushTokenString(for: activity)
     }
 
     // MARK: - getActiveActivities
@@ -254,8 +268,8 @@ public class LiveActivityManager {
                 "activityType": activity.attributes.activityType,
                 "state": activity.activityState.rawStateString
             ]
-            if let tokenData = activity.pushToken {
-                info["pushToken"] = tokenData.map { String(format: "%02x", $0) }.joined()
+            if let token = pushTokenString(for: activity) {
+                info["pushToken"] = token
             }
             return info
         }
