@@ -130,7 +130,6 @@ public class LiveActivityManager {
                 self.lock.lock()
                 self.pushTokens[activityId] = token
                 self.lock.unlock()
-                NSLog("LiveActivityManager: push token updated for activity %@", activityId)
                 NotificationCenter.default.post(
                     name: .liveActivityPushTokenUpdated,
                     object: nil,
