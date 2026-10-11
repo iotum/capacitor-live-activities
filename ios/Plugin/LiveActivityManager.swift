@@ -18,6 +18,7 @@ public class LiveActivityManager {
     private var activities: [String: Activity<LiveActivityAttributes>] = [:]
     // activity.pushToken can stay nil (e.g. push-started activities) even after pushTokenUpdates emits.
     private var pushTokens: [String: String] = [:]
+    private var tokenTasks: [String: Task<Void, Never>] = [:]
     private let lock = NSLock()
     private var isObservingActivities = false
 
@@ -88,6 +89,7 @@ public class LiveActivityManager {
         lock.lock(); defer { lock.unlock() }
         activities.removeValue(forKey: id)
         pushTokens.removeValue(forKey: id)
+        tokenTasks.removeValue(forKey: id)?.cancel()
     }
 
     private func pushTokenString(for activity: Activity<LiveActivityAttributes>) -> String? {
@@ -120,14 +122,17 @@ public class LiveActivityManager {
                 if stateUpdate == .ended || stateUpdate == .dismissed {
                     self.forget(activityId)
                 }
+                if stateUpdate == .dismissed { break }
             }
         }
 
         // Observe push token changes (issued on first request, may rotate)
-        Task {
+        let tokenTask = Task {
             for await tokenData in activity.pushTokenUpdates {
                 let token = tokenData.map { String(format: "%02x", $0) }.joined()
                 self.lock.lock()
+                // Checked under the lock so a concurrent forget() can't be undone.
+                guard !Task.isCancelled else { self.lock.unlock(); break }
                 self.pushTokens[activityId] = token
                 self.lock.unlock()
                 NotificationCenter.default.post(
@@ -141,6 +146,13 @@ public class LiveActivityManager {
                 )
             }
         }
+        lock.lock()
+        if activities[activityId] != nil {
+            tokenTasks[activityId] = tokenTask
+        } else {
+            tokenTask.cancel()
+        }
+        lock.unlock()
     }
 
     // MARK: - areActivitiesEnabled
