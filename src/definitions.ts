@@ -209,6 +209,16 @@ export interface ActivityStateChangedEvent {
 
 export interface LiveActivitiesPlugin {
   /**
+   * iOS only. Persist an HTTPS token postback URL and the exact WebView origin.
+   * Native uploads use fresh WK session cookies, including during background launches.
+   * The host must be allowed by native Capacitor configuration. Call after login.
+   */
+  configureTokenUpload(options: { url: string; origin: string }): Promise<void>;
+
+  /** iOS only. Clear the persisted postback configuration and cancel uploads on logout. */
+  resetTokenUpload(): Promise<void>;
+
+  /**
    * Returns true when the current platform and OS version support Live Activities
    * (iOS 16.2+ with the feature enabled by the user) or Live Updates (Android 16+).
    * On older Android versions this still returns true because the plugin falls back

@@ -14,6 +14,14 @@ import type {
 import type { PluginListenerHandle } from '@capacitor/core';
 
 export class LiveActivitiesWeb extends WebPlugin implements LiveActivitiesPlugin {
+  async configureTokenUpload(_options: { url: string; origin: string }): Promise<void> {
+    throw this.unimplemented('Native token uploads are only supported on iOS.');
+  }
+
+  async resetTokenUpload(): Promise<void> {
+    throw this.unimplemented('Native token uploads are only supported on iOS.');
+  }
+
   async isSupported(): Promise<{ supported: boolean }> {
     return { supported: false };
   }

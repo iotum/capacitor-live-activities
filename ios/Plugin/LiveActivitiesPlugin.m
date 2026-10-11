@@ -10,4 +10,6 @@ CAP_PLUGIN(LiveActivitiesPlugin, "LiveActivities",
   CAP_PLUGIN_METHOD(getActiveActivities, CAPPluginReturnPromise);
   CAP_PLUGIN_METHOD(getPushToken, CAPPluginReturnPromise);
   CAP_PLUGIN_METHOD(getPushToStartToken, CAPPluginReturnPromise);
+  CAP_PLUGIN_METHOD(configureTokenUpload, CAPPluginReturnPromise);
+  CAP_PLUGIN_METHOD(resetTokenUpload, CAPPluginReturnPromise);
 )

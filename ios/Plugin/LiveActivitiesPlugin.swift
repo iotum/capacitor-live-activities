@@ -20,6 +20,8 @@ public class LiveActivitiesPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "getActiveActivities", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getPushToken", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getPushToStartToken", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "configureTokenUpload", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "resetTokenUpload", returnType: CAPPluginReturnPromise),
     ]
 
     private var stateObserver: NSObjectProtocol?
@@ -56,9 +58,55 @@ public class LiveActivitiesPlugin: CAPPlugin, CAPBridgedPlugin {
 
         // Begin observing the push-to-start token immediately so the server
         // can launch activities even before the app calls start().
-        if #available(iOS 16.2, *) {
-            LiveActivityManager.shared.startObservingPushToStartToken()
-            LiveActivityManager.shared.startObservingActivities()
+        Self.startNativeObservers()
+    }
+
+    @objc public static func startNativeObservers() {
+        let start = {
+            if #available(iOS 16.2, *) {
+                LiveActivityManager.shared.startObservingPushToStartToken()
+                LiveActivityManager.shared.startObservingActivities()
+            }
+        }
+        if Thread.isMainThread {
+            start()
+        } else {
+            DispatchQueue.main.async(execute: start)
+        }
+    }
+
+    @objc func configureTokenUpload(_ call: CAPPluginCall) {
+        guard #available(iOS 16.2, *) else {
+            call.reject("Native token uploads require iOS 16.2 or later")
+            return
+        }
+        guard let url = call.getString("url"), let origin = call.getString("origin") else {
+            call.reject("url and origin are required")
+            return
+        }
+        Task { @MainActor in
+            do {
+                try LiveActivityTokenUploader.shared.configure(url: url, origin: origin)
+                Self.startNativeObservers()
+                if #available(iOS 16.2, *) {
+                    LiveActivityManager.shared.uploadCachedTokens()
+                }
+                call.resolve()
+            } catch {
+                print("LiveActivities: token upload configuration failed: \(error.localizedDescription)")
+                call.reject(error.localizedDescription)
+            }
+        }
+    }
+
+    @objc func resetTokenUpload(_ call: CAPPluginCall) {
+        guard #available(iOS 16.2, *) else {
+            call.reject("Native token uploads require iOS 16.2 or later")
+            return
+        }
+        Task { @MainActor in
+            LiveActivityTokenUploader.shared.reset()
+            call.resolve()
         }
     }
 

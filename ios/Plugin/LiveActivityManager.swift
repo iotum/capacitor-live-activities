@@ -19,6 +19,7 @@ public class LiveActivityManager {
     // activity.pushToken can stay nil (e.g. push-started activities) even after pushTokenUpdates emits.
     private var pushTokens: [String: String] = [:]
     private var tokenTasks: [String: Task<Void, Never>] = [:]
+    private var watchedActivityIds: Set<String> = []
     private let lock = NSLock()
     private var isObservingActivities = false
 
@@ -45,7 +46,11 @@ public class LiveActivityManager {
             Task {
                 for await tokenData in Activity<LiveActivityAttributes>.pushToStartTokenUpdates {
                     let token = tokenData.map { String(format: "%02x", $0) }.joined()
-                    self.pushToStartToken = token
+                    self.lock.withLock { self.pushToStartToken = token }
+                    print("LiveActivities: push-to-start token received")
+                    Task { @MainActor in
+                        LiveActivityTokenUploader.shared.upload(["kind": "push_to_start", "token": token])
+                    }
                     NotificationCenter.default.post(
                         name: .liveActivityPushToStartTokenUpdated,
                         object: nil,
@@ -60,7 +65,8 @@ public class LiveActivityManager {
     /// or unsupported (< iOS 17.2). Listen to `pushToStartTokenUpdated` for the
     /// value as soon as the system issues it.
     func getPushToStartToken() -> String? {
-        pushToStartToken
+        lock.lock(); defer { lock.unlock() }
+        return pushToStartToken
     }
 
     // MARK: - Activity tracking
@@ -71,6 +77,7 @@ public class LiveActivityManager {
     func startObservingActivities() {
         guard !isObservingActivities else { return }
         isObservingActivities = true
+        print("LiveActivities: activity observation started")
 
         Activity<LiveActivityAttributes>.activities.forEach { track($0) }
         Task {
@@ -86,10 +93,16 @@ public class LiveActivityManager {
     }
 
     private func forget(_ id: String) {
-        lock.lock(); defer { lock.unlock() }
-        activities.removeValue(forKey: id)
+        lock.lock()
+        let wasTracked = activities.removeValue(forKey: id) != nil
         pushTokens.removeValue(forKey: id)
         tokenTasks.removeValue(forKey: id)?.cancel()
+        lock.unlock()
+        // Only the first forget (end() or ended/dismissed state) sends the DELETE.
+        guard wasTracked else { return }
+        Task { @MainActor in
+            LiveActivityTokenUploader.shared.upload(["activity_id": id], method: "DELETE")
+        }
     }
 
     private func pushTokenString(for activity: Activity<LiveActivityAttributes>) -> String? {
@@ -103,10 +116,14 @@ public class LiveActivityManager {
     private func track(_ activity: Activity<LiveActivityAttributes>) {
         let activityId = activity.id
         lock.lock()
-        let isNew = activities[activityId] == nil
+        let isNew = watchedActivityIds.insert(activityId).inserted
+        guard isNew else { lock.unlock(); return }
         activities[activityId] = activity
         lock.unlock()
-        guard isNew else { return }
+        print("LiveActivities: observing activity \(activityId)")
+        if let token = pushTokenString(for: activity) {
+            uploadToken(token, for: activity)
+        }
 
         // Observe state changes and forward them as Capacitor events
         Task {
@@ -135,6 +152,8 @@ public class LiveActivityManager {
                 guard !Task.isCancelled else { self.lock.unlock(); break }
                 self.pushTokens[activityId] = token
                 self.lock.unlock()
+                print("LiveActivities: activity token received for \(activityId)")
+                self.uploadToken(token, for: activity)
                 NotificationCenter.default.post(
                     name: .liveActivityPushTokenUpdated,
                     object: nil,
@@ -153,6 +172,34 @@ public class LiveActivityManager {
             tokenTask.cancel()
         }
         lock.unlock()
+    }
+
+    private func uploadToken(_ token: String, for activity: Activity<LiveActivityAttributes>) {
+        let payload = [
+            "kind": "activity", "token": token,
+            "activity_id": activity.id,
+            "activity_type": activity.attributes.activityType
+        ]
+        Task { @MainActor in
+            LiveActivityTokenUploader.shared.upload(payload)
+        }
+    }
+
+    func uploadCachedTokens() {
+        lock.lock()
+        let tracked = Array(activities.values)
+        let startToken = pushToStartToken
+        lock.unlock()
+        for activity in tracked where activity.activityState == .active || activity.activityState == .stale {
+            if let token = pushTokenString(for: activity) {
+                uploadToken(token, for: activity)
+            }
+        }
+        if let token = startToken {
+            Task { @MainActor in
+                LiveActivityTokenUploader.shared.upload(["kind": "push_to_start", "token": token])
+            }
+        }
     }
 
     // MARK: - areActivitiesEnabled

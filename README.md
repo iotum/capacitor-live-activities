@@ -116,6 +116,132 @@ npx cap sync
 
 ## iOS setup
 
+### Native token postbacks
+
+On iOS, configure token uploads after login using the absolute HTTPS URL of
+your app server's token endpoint (not a relative URL or an `app://` URL):
+
+```typescript
+import { Capacitor } from '@capacitor/core';
+import { LiveActivities } from '@ciabosoftwaresolutions/capacitor-live-activities';
+
+if (Capacitor.getPlatform() === 'ios') {
+  await LiveActivities.configureTokenUpload({
+    url: `${appServerBaseURL}/live_activity_tokens`,
+    origin: window.location.origin,
+  });
+}
+```
+
+The URL and origin persist across launches. Registration also uploads currently
+cached tokens. Call `await LiveActivities.resetTokenUpload()` before logout or
+switching accounts/servers; it clears configuration and cancels pending uploads.
+No cookies or tokens are stored in the configuration.
+
+The destination must use HTTPS and match the Capacitor `server.hostname` or
+`server.url` host. For another app server host, supply an explicit native allowlist
+in Capacitor config (this replaces the default host list):
+
+```json
+{
+  "plugins": {
+    "LiveActivities": {
+      "tokenUploadAllowedHosts": ["api.example.com"]
+    }
+  }
+}
+```
+
+Allowlist entries can also use `*.example.com` to trust subdomains of that domain.
+This does not match the root domain or lookalike domains; include `example.com`
+separately when needed. HTTPS remains required for every upload.
+
+The origin must exactly match the configured WebView origin. `configureTokenUpload`
+rejects on iOS < 16.2, a missing `url`/`origin`, a non-HTTPS or disallowed host,
+URL credentials/fragment, or an origin mismatch.
+
+#### When POSTs are sent
+
+- On `configureTokenUpload` (for cached activity tokens of `active`/`stale`
+  activities, and the cached push-to-start token).
+- When an activity is adopted at launch or started (if its token is known).
+- Whenever iOS issues or rotates an activity or push-to-start token.
+
+The same token is therefore POSTed repeatedly (every launch, every
+configure call). Tokens are not queued while unconfigured, and failed uploads
+are not persisted; they are retried only on the next trigger above.
+
+#### Request format
+
+| Request | Body |
+|---|---|
+| `POST` activity token | `{"kind": "activity", "token", "activity_id", "activity_type"}` |
+| `POST` push-to-start token | `{"kind": "push_to_start", "token"}` |
+| `DELETE` activity token | `{"activity_id"}` |
+
+All requests go to the configured URL with JSON bodies and the headers
+`Content-Type: application/json`, `Accept: application/json`, `Origin` and
+`Cookie`. Tokens are lowercase hex. Native requests need no CORS.
+
+- **Auth:** cookies are read fresh from the default `WKWebsiteDataStore`,
+  filtered by host, path and expiry, and forwarded as-is. The app must keep
+  the WebView session valid; the server authenticates and rejects (e.g. 401)
+  requests without a session.
+- **Delivery:** five-second timeout per attempt; up to two retries on network
+  errors with one/two-second backoff. Redirects are not followed. HTTP errors
+  are not retried. Any 2xx counts as success; the response body is ignored.
+- **Background:** each request runs in a background task. It is skipped if
+  iOS grants no background time and cancelled when the time expires.
+
+#### DELETE
+
+When a tracked activity ends (via `end()` or an `ended`/`dismissed` state,
+including push-driven ends), the plugin sends one DELETE with the same auth,
+headers and delivery rules.
+
+#### Server and app considerations
+
+- **Make POST an upsert.** Key activity tokens by `activity_id` (replacing a
+  rotated token) and push-to-start tokens by session/user; repeats are normal.
+- **Make DELETE idempotent.** If the app also removes tokens from JS (for
+  example on `activityStateChanged`), the server receives duplicate DELETEs
+  while the WebView is alive. Either accept repeats without error or drop the
+  JS removal.
+- **Requests are not ordered.** A retried POST can arrive after the DELETE
+  for the same activity. Ignore or expire tokens for activities the server
+  already considers ended.
+- **Don't delete on `stale`.** A stale activity still accepts push updates;
+  the native side only deletes on `ended`/`dismissed`. Mirror that in any JS
+  cleanup.
+- **CSRF.** Native requests send no CSRF token header. The server must accept
+  the `Origin` header (plus session cookie) for both POST and DELETE.
+- **No DELETE without a running process.** If an activity ends while the app
+  is terminated and iOS does not relaunch it, no DELETE is sent. Treat APNs
+  errors (e.g. `410`/invalid token) and token age as the final cleanup path.
+
+#### Startup
+
+For background launches, import the plugin module in AppDelegate and call
+the startup API at the beginning of `didFinishLaunchingWithOptions`, before
+creating/loading the bridge or WebView:
+
+```swift
+import CiabosoftwaresolutionsCapacitorLiveActivities
+
+// In application(_:didFinishLaunchingWithOptions:):
+LiveActivitiesPlugin.startNativeObservers()
+```
+
+The plugin's `load()` remains an idempotent fallback. Existing JS events and
+getters are unchanged; events emitted before JS listeners exist are not replayed.
+Android has no native token postback implementation; guard calls by platform.
+
+Verify on a physical device running iOS 17.2+: log in and register the postback,
+background/lock the device, trigger push-to-start, and confirm an authenticated
+POST before opening the app. Then send update/end pushes. Test termination
+separately: background tasks extend execution but cannot force iOS to launch
+the process. Logs use `LiveActivities:` and never include full tokens/cookies.
+
 > **Device requirement** — Live Activities and the Dynamic Island render on physical devices only. The Lock Screen banner is visible in the iOS 16.2+ Simulator but the Dynamic Island is not. Always test the full experience on a real device.
 
 ---
@@ -594,7 +720,7 @@ the timer, for example `Ended · 02:34` supplied by the server. Links accept HTT
 configure universal links in the host app for in-app routing. Missing-value pills
 can use their source `display` string verbatim, including an em dash.
 
-Rails can map matches to `{id, label: displayName, badge: crm.monogram, selected}`
+The app server can map matches to `{id, label: displayName, badge: crm.monogram, selected}`
 and metrics to `{id: key, label, value: display}`. It should keep customer order,
 preserve stable ids, and replace the complete display on each context update.
 
@@ -660,6 +786,8 @@ The **compact** presentation (the small pill around the camera) is deliberately 
 
 <docgen-index>
 
+* [`configureTokenUpload(...)`](#configuretokenupload)
+* [`resetTokenUpload()`](#resettokenupload)
 * [`isSupported()`](#issupported)
 * [`areActivitiesEnabled()`](#areactivitiesenabled)
 * [`start(...)`](#start)
@@ -676,6 +804,38 @@ The **compact** presentation (the small pill around the camera) is deliberately 
 
 <docgen-api>
 <!--Update the source file JSDoc comments and rerun docgen to update the docs below-->
+
+### configureTokenUpload(...)
+
+```typescript
+configureTokenUpload(options: { url: string; origin: string; }) => any
+```
+
+iOS only. Persist an HTTPS token postback URL and the exact WebView origin.
+Native uploads use fresh WK session cookies, including during background launches.
+The host must be allowed by native Capacitor configuration. Call after login.
+
+| Param         | Type                                          |
+| ------------- | --------------------------------------------- |
+| **`options`** | <code>{ url: string; origin: string; }</code> |
+
+**Returns:** <code>any</code>
+
+--------------------
+
+
+### resetTokenUpload()
+
+```typescript
+resetTokenUpload() => any
+```
+
+iOS only. Clear the persisted postback configuration and cancel uploads on logout.
+
+**Returns:** <code>any</code>
+
+--------------------
+
 
 ### isSupported()
 
@@ -888,24 +1048,37 @@ Keep this small; use `state` for anything that updates.
 
 #### LiveActivityState
 
+| Prop                    | Type                                                                | Description                                                                                                                                                                                                                                                                                                                                            |
+| ----------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **`title`**             | <code>string</code>                                                 | Primary headline shown on the Lock Screen / Dynamic Island.                                                                                                                                                                                                                                                                                            |
+| **`display`**           | <code><a href="#liveactivitydisplay">LiveActivityDisplay</a></code> | iOS widget display contract. Requires the supplied widget template in the host extension.                                                                                                                                                                                                                                                              |
+| **`subtitle`**          | <code>string</code>                                                 | Secondary line of text.                                                                                                                                                                                                                                                                                                                                |
+| **`progress`**          | <code>number</code>                                                 | Optional progress value between 0.0 and 1.0.                                                                                                                                                                                                                                                                                                           |
+| **`icon`**              | <code>string</code>                                                 | Optional SF Symbol name (iOS) or Android drawable name for a status icon.                                                                                                                                                                                                                                                                              |
+| **`backgroundColor`**   | <code>string</code>                                                 | iOS only — hex color string for the activity background tint. Applied to the Lock Screen banner and expanded Dynamic Island background. Accepts hex with or without `#`: `#RGB`, `#RGBA`, `#RRGGBB` or `#RRGGBBAA`, e.g. `"#1a1a2e"` or `"#1a1a2e80"`. Defaults to a dark semi-transparent fill when omitted.                                          |
+| **`progressColor`**     | <code>string</code>                                                 | iOS only — hex color string for the progress bar, progress ring and timer bar. Defaults to white when omitted.                                                                                                                                                                                                                                         |
+| **`textColor`**         | <code>string</code>                                                 | iOS only — hex color string for title and subtitle text. Defaults to white when omitted.                                                                                                                                                                                                                                                               |
+| **`iconColor`**         | <code>string</code>                                                 | iOS only — hex color string for the SF Symbol icon. Defaults to white when omitted.                                                                                                                                                                                                                                                                    |
+| **`keylineTint`**       | <code>string</code>                                                 | iOS only — hex color string for the keyline (the thin colored outline that wraps the **expanded** Dynamic Island). A common way to give the island a branded, "full-length" colored glow. Defaults to no keyline when omitted.                                                                                                                         |
+| **`progressBarHeight`** | <code>number</code>                                                 | iOS only — thickness in points of the linear progress bar shown on the Lock Screen and in the expanded Dynamic Island bottom region. Range 2–20. Defaults to the system thickness (~4) when omitted.                                                                                                                                                   |
+| **`progressBarRadius`** | <code>number</code>                                                 | iOS only — corner radius in points applied to the linear progress bar when `progressBarHeight` is set. Defaults to half the bar height (pill shape).                                                                                                                                                                                                   |
+| **`timerEnd`**          | <code>number</code>                                                 | iOS only — Unix timestamp (seconds since epoch) when the timer ends. When set, the widget renders a live countdown and an auto-animating progress bar. The system updates the display every second automatically — no `update()` calls needed from JavaScript. Example — start a 2m 30s countdown: ```typescript timerEnd: Date.now() / 1000 + 150 ``` |
+| **`timerStart`**        | <code>number</code>                                                 | iOS only — Unix timestamp when the timer started. Used alongside `timerEnd` to compute the progress ring fill. Defaults to `Date.now()` at the moment `start()` is called if omitted.                                                                                                                                                                  |
+| **`timerCountsDown`**   | <code>boolean</code>                                                | iOS only — direction of the timer progress bar/ring. - `true` (default) — bar starts **full** and drains right-to-left as time runs out. - `false` — bar starts **empty** and fills left-to-right as time elapses. The countdown **text** always shows remaining time regardless of this setting.                                                      |
+
+
+#### LiveActivityDisplay
+
 Dynamic data for a Live Activity — can be pushed via `update()` at any time.
 
-| Prop                    | Type                 | Description                                                                                                                                                                                                                                                                                                                                            |
-| ----------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **`title`**             | <code>string</code>  | Primary headline shown on the Lock Screen / Dynamic Island.                                                                                                                                                                                                                                                                                            |
-| **`subtitle`**          | <code>string</code>  | Secondary line of text.                                                                                                                                                                                                                                                                                                                                |
-| **`progress`**          | <code>number</code>  | Optional progress value between 0.0 and 1.0.                                                                                                                                                                                                                                                                                                           |
-| **`icon`**              | <code>string</code>  | Optional SF Symbol name (iOS) or Android drawable name for a status icon.                                                                                                                                                                                                                                                                              |
-| **`backgroundColor`**   | <code>string</code>  | iOS only — hex color string for the activity background tint. Applied to the Lock Screen banner and expanded Dynamic Island background. Accepts hex with or without `#`: `#RGB`, `#RGBA`, `#RRGGBB` or `#RRGGBBAA`, e.g. `"#1a1a2e"` or `"#1a1a2e80"`. Defaults to a dark semi-transparent fill when omitted.                                                                         |
-| **`progressColor`**     | <code>string</code>  | iOS only — hex color string for the progress bar, progress ring and timer bar. Defaults to white when omitted.                                                                                                                                                                                                                                         |
-| **`textColor`**         | <code>string</code>  | iOS only — hex color string for title and subtitle text. Defaults to white when omitted.                                                                                                                                                                                                                                                               |
-| **`iconColor`**         | <code>string</code>  | iOS only — hex color string for the SF Symbol icon. Defaults to white when omitted.                                                                                                                                                                                                                                                                    |
-| **`keylineTint`**       | <code>string</code>  | iOS only — hex color string for the keyline (the thin colored outline that wraps the **expanded** Dynamic Island). A common way to give the island a branded, "full-length" colored glow. Defaults to no keyline when omitted.                                                                                                                         |
-| **`progressBarHeight`** | <code>number</code>  | iOS only — thickness in points of the linear progress bar shown on the Lock Screen and in the expanded Dynamic Island bottom region. Range 2–20. Defaults to the system thickness (~4) when omitted.                                                                                                                                                   |
-| **`progressBarRadius`** | <code>number</code>  | iOS only — corner radius in points applied to the linear progress bar when `progressBarHeight` is set. Defaults to half the bar height (pill shape).                                                                                                                                                                                                   |
-| **`timerEnd`**          | <code>number</code>  | iOS only — Unix timestamp (seconds since epoch) when the timer ends. When set, the widget renders a live countdown and an auto-animating progress bar. The system updates the display every second automatically — no `update()` calls needed from JavaScript. Example — start a 2m 30s countdown: ```typescript timerEnd: Date.now() / 1000 + 150 ``` |
-| **`timerStart`**        | <code>number</code>  | iOS only — Unix timestamp when the timer started. Used alongside `timerEnd` to compute the progress ring fill. Defaults to `Date.now()` at the moment `start()` is called if omitted.                                                                                                                                                                  |
-| **`timerCountsDown`**   | <code>boolean</code> | iOS only — direction of the timer progress bar/ring. - `true` (default) — bar starts **full** and drains right-to-left as time runs out. - `false` — bar starts **empty** and fills left-to-right as time elapses. The countdown **text** always shows remaining time regardless of this setting.                                                      |
+| Prop           | Type                | Description                                                             |
+| -------------- | ------------------- | ----------------------------------------------------------------------- |
+| **`version`**  | <code>1</code>      |                                                                         |
+| **`status`**   | <code>string</code> |                                                                         |
+| **`header`**   | <code>string</code> | Small line above the title; enables the card layout on the Lock Screen. |
+| **`url`**      | <code>string</code> |                                                                         |
+| **`sections`** | <code>{}</code>     |                                                                         |
+| **`actions`**  | <code>{}</code>     |                                                                         |
 
 
 #### UpdateOptions
