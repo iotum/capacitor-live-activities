@@ -86,7 +86,7 @@ private struct ActivityPanel: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(state.title).font(.headline).lineLimit(1)
                     if let subtitle = state.subtitle {
-                        Text(subtitle).font(.caption).lineLimit(1)
+                        Text(subtitle).font(.footnote).opacity(0.8).lineLimit(1)
                     }
                 }
                 Spacer(minLength: 4)
@@ -117,11 +117,15 @@ private struct ActivityCard: View {
 
     var body: some View {
         let items = Array((display.sections.first?.items ?? []).prefix(3))
-        VStack(alignment: .leading, spacing: 5) {
-            Text(header).font(.footnote).opacity(0.7).lineLimit(1)
-            Text(state.title).font(.system(size: 20, weight: .bold)).lineLimit(1)
+        // Only actions with a tappable URL are rendered, so the row never has dead buttons.
+        let actions = display.actions.compactMap { action in
+            activityURL(action.url).map { (action, $0) }
+        }.prefix(2)
+        VStack(alignment: .leading, spacing: 4) {
+            Text(header).font(.caption.weight(.medium)).opacity(0.75).lineLimit(1)
+            Text(state.title).font(.system(.title3, weight: .bold)).lineLimit(1)
             if showSubtitle, let subtitle = state.subtitle {
-                Text(subtitle).font(.subheadline).opacity(0.75).lineLimit(1)
+                Text(subtitle).font(.footnote).opacity(0.8).lineLimit(1)
             }
             if showPills && !items.isEmpty {
                 HStack(spacing: 6) {
@@ -134,14 +138,14 @@ private struct ActivityCard: View {
                     }
                 }
             }
-            HStack(spacing: 10) {
-                ForEach(Array(display.actions.prefix(2))) { action in
-                    if let url = activityURL(action.url) {
+            if !actions.isEmpty {
+                HStack(spacing: 10) {
+                    ForEach(Array(actions), id: \.0.id) { action, url in
                         Link(destination: url) { ActivityButton(action: action) }
                     }
                 }
+                .padding(.top, 2)
             }
-            .padding(.top, 2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)
@@ -164,10 +168,11 @@ private struct ActivityButton: View {
             if let icon = action.icon { Image(systemName: icon) }
             Text(action.label)
         }
-        .font(.system(size: 16, weight: .semibold))
+        .font(.system(size: 15, weight: .semibold))
         .foregroundColor(text)
         .lineLimit(1)
-        .frame(maxWidth: .infinity, minHeight: 34)
+        .minimumScaleFactor(0.85)
+        .frame(maxWidth: .infinity, minHeight: 32)
         .background(fill, in: Capsule())
     }
 }
@@ -177,7 +182,7 @@ private struct ActivityIcon: View {
     let state: LiveActivityAttributes.ContentState
 
     var body: some View {
-        Image(systemName: state.icon ?? "phone.fill")
+        Image(systemName: state.icon ?? "info.circle")
             .foregroundColor(Color(hex: state.iconColor) ?? .white)
     }
 }
@@ -226,7 +231,7 @@ private struct ActivityStatus: View {
                 Text(progress, format: .percent.precision(.fractionLength(0)))
             }
         }
-        .font(.caption.monospacedDigit())
+        .font(.footnote.weight(.medium).monospacedDigit())
         .lineLimit(1)
     }
 }
@@ -285,6 +290,9 @@ private struct ActivityPill: View {
 
     var body: some View {
         let tint = Color(hex: item.color)
+        let selected = item.selected == true
+        let fillOpacity = selected ? 0.3 : (tint != nil ? 0.2 : 0.12)
+        let strokeOpacity = selected ? 0.7 : (tint != nil ? 0.4 : 0)
         HStack(spacing: 4) {
             if let badge = item.badge {
                 Text(badge).bold().lineLimit(1)
@@ -294,13 +302,13 @@ private struct ActivityPill: View {
                 Text(value).bold().lineLimit(1)
             }
         }
-        .font(.system(size: 14, weight: .semibold))
+        .font(.system(size: 13, weight: .semibold))
         .foregroundColor(tint)
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
         .frame(maxWidth: fill ? .infinity : nil, alignment: .leading)
-        .background((tint ?? .white).opacity(tint != nil ? 0.22 : (item.selected == true ? 0.25 : 0.12)), in: Capsule())
-        .overlay(Capsule().strokeBorder((tint ?? .white).opacity(tint != nil ? 0.5 : (item.selected == true ? 0.6 : 0)), lineWidth: 1))
+        .background((tint ?? .white).opacity(fillOpacity), in: Capsule())
+        .overlay(Capsule().strokeBorder((tint ?? .white).opacity(strokeOpacity), lineWidth: 1))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel([item.badge, item.label, item.value].compactMap { $0 }.joined(separator: ", "))
         .accessibilityAddTraits(item.selected == true ? [.isSelected] : [])
@@ -318,11 +326,17 @@ private extension Color {
     init?(hex: String?) {
         guard var hex = hex?.trimmingCharacters(in: .whitespacesAndNewlines), !hex.isEmpty else { return nil }
         if hex.hasPrefix("#") { hex.removeFirst() }
-        guard hex.count == 6, let value = UInt64(hex, radix: 16) else { return nil }
+        // Shorthand #RGB / #RGBA expands each digit; 8 digits are #RRGGBBAA.
+        if hex.count == 3 || hex.count == 4 { hex = hex.map { "\($0)\($0)" }.joined() }
+        guard hex.count == 6 || hex.count == 8, let value = UInt64(hex, radix: 16) else { return nil }
+        let hasAlpha = hex.count == 8
+        let rgb = hasAlpha ? value >> 8 : value
         self.init(
-            red: Double((value >> 16) & 0xFF) / 255,
-            green: Double((value >> 8) & 0xFF) / 255,
-            blue: Double(value & 0xFF) / 255
+            .sRGB,
+            red: Double((rgb >> 16) & 0xFF) / 255,
+            green: Double((rgb >> 8) & 0xFF) / 255,
+            blue: Double(rgb & 0xFF) / 255,
+            opacity: hasAlpha ? Double(value & 0xFF) / 255 : 1
         )
     }
 }

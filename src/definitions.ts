@@ -29,7 +29,7 @@ export interface LiveActivityDisplay {
       value?: string;
       badge?: string;
       selected?: boolean;
-      /** Hex color for the pill tint and text. */
+      /** Hex color (`#RGB`, `#RRGGBB` or `#RRGGBBAA`) for the pill tint and text. */
       color?: string;
       url?: string;
     }[];
@@ -58,7 +58,7 @@ export interface LiveActivityState {
   /**
    * iOS only — hex color string for the activity background tint.
    * Applied to the Lock Screen banner and expanded Dynamic Island background.
-   * Accepts 6-digit hex with or without `#` prefix, e.g. `"#1a1a2e"` or `"1a1a2e"`.
+   * Accepts hex with or without `#`: `#RGB`, `#RGBA`, `#RRGGBB` or `#RRGGBBAA`, e.g. `"#1a1a2e"` or `"#1a1a2e80"`.
    * Defaults to a dark semi-transparent fill when omitted.
    */
   backgroundColor?: string;
