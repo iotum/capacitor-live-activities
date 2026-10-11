@@ -15,39 +15,44 @@ export interface LiveActivityAttributes {
  * Dynamic data for a Live Activity — can be pushed via `update()` at any time.
  */
 export interface LiveActivityDisplay {
-  version: 1;
+  version: 2;
+  template: 'summary' | 'progress';
   status?: string;
-  /** Small line above the title; enables the card layout on the Lock Screen. */
   header?: string;
+  /** Shared accent token; native renderers choose accessible colors. */
+  phase?: 'ringing' | 'connected' | 'ended';
+  /** Semantic icon mapped to bundled native resources. */
+  icon?: 'call' | 'info' | 'delivery' | 'check';
   url?: string;
-  sections: {
+  /** Unix seconds on every transport, including APNs. */
+  timer?: { mode: 'elapsed'; start: number } | { mode: 'countdown'; end: number; start?: number } | { mode: 'frozen'; seconds: number };
+  items: {
     id: string;
-    title?: string;
-    items: {
-      id: string;
-      label: string;
-      value?: string;
-      badge?: string;
-      selected?: boolean;
-      /** Hex color (`#RGB`, `#RRGGBB` or `#RRGGBBAA`) for the pill tint and text. */
-      color?: string;
-      url?: string;
-    }[];
+    kind: 'metric' | 'badge' | 'text';
+    label: string;
+    value?: string;
+    badge?: string;
+    selected?: boolean;
   }[];
   actions: {
     id: string;
     label: string;
-    icon?: string;
-    /** `primary` = filled green, `destructive` = tinted red, otherwise neutral. */
-    style?: 'primary' | 'destructive' | 'default';
     url: string;
+    icon?: 'record' | 'ticket' | 'note' | 'open';
+    /** Android uses semantic action hints; system notification buttons control their own fills. */
+    emphasis?: 'primary' | 'secondary' | 'destructive';
   }[];
+  profiles: {
+    minimal: { indicator: 'icon' | 'timer' | 'status' | 'progress' };
+    compact: { indicator: 'icon' | 'timer' | 'status' | 'progress' };
+    expanded: { itemIds: string[]; actionIds: string[]; showSubtitle: boolean };
+  };
 }
 
 export interface LiveActivityState {
   /** Primary headline shown on the Lock Screen / Dynamic Island. */
   title: string;
-  /** iOS widget display contract. Requires the supplied widget template in the host extension. */
+  /** Shared iOS/Android display contract. Rails selects content; native code adapts layout. */
   display?: LiveActivityDisplay;
   /** Secondary line of text. */
   subtitle?: string;

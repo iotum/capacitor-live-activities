@@ -95,7 +95,7 @@ public struct LiveActivityAttributes: ActivityAttributes {
             keylineTint = try c.decodeIfPresent(String.self, forKey: .keylineTint)
             progressBarHeight = try c.decodeIfPresent(Double.self, forKey: .progressBarHeight)
             progressBarRadius = try c.decodeIfPresent(Double.self, forKey: .progressBarRadius)
-            display = try c.decodeIfPresent(LiveActivityDisplay.self, forKey: .display)
+            display = try? c.decodeIfPresent(LiveActivityDisplay.self, forKey: .display)
             extras = try c.decodeIfPresent([String: AnyCodable].self, forKey: .extras) ?? [:]
         }
     }
@@ -122,37 +122,65 @@ public struct LiveActivityAttributes: ActivityAttributes {
 
 public struct LiveActivityDisplay: Codable, Hashable {
     public var version: Int
+    public var template: String
     public var status: String?
-    /// When set, the Lock Screen renders the card layout with this small line above the title.
-    public var header: String?
+    public var icon: String?
     public var url: String?
-    public var sections: [Section]
+    public var timer: Timer?
+    public var phase: String?
+    public var header: String?
+    public var items: [Item]
     public var actions: [Action]
+    public var profiles: Profiles
 
-    public struct Section: Codable, Hashable, Identifiable {
-        public var id: String
-        public var title: String?
-        public var items: [Item]
+    public var supported: Bool { version == 2 && ["summary", "progress"].contains(template) }
+
+    public var selectedItems: [Item] {
+        profiles.expanded.itemIds.prefix(3).compactMap { id in items.first { $0.id == id } }
+    }
+
+    public var selectedActions: [Action] {
+        profiles.expanded.actionIds.prefix(2).compactMap { id in actions.first { $0.id == id } }
+    }
+
+    public struct Timer: Codable, Hashable {
+        public var mode: String
+        public var start: Double?
+        public var end: Double?
+        public var seconds: Double?
+    }
+
+    public struct Profiles: Codable, Hashable {
+        public var minimal: Indicator
+        public var compact: Indicator
+        public var expanded: Expanded
+    }
+
+    public struct Indicator: Codable, Hashable {
+        public var indicator: String
+    }
+
+    public struct Expanded: Codable, Hashable {
+        public var itemIds: [String]
+        public var actionIds: [String]
+        public var showSubtitle: Bool
     }
 
     public struct Item: Codable, Hashable, Identifiable {
         public var id: String
+        public var kind: String
         public var label: String
         public var value: String?
         public var badge: String?
         public var selected: Bool?
-        /// Hex color for the pill tint and text.
-        public var color: String?
-        public var url: String?
     }
 
     public struct Action: Codable, Hashable, Identifiable {
         public var id: String
         public var label: String
-        public var icon: String?
-        /// "primary" (filled green), "destructive" (tinted red) or default (neutral).
-        public var style: String?
         public var url: String
+        public var icon: String?
+        public var emphasis: String?
     }
 }
 

@@ -1,0 +1,24 @@
+{
+  "title": "Jane Example",
+  "subtitle": "Example Industries",
+  "display": {
+    "version": 2,
+    "template": "summary",
+    "status": "On call",
+    "phase": "connected",
+    "header": "HubSpot",
+    "icon": "call",
+    "url": "https://app.example.com/app/call/123",
+    "timer": { "mode": "elapsed", "start": 1791712800 },
+    "items": [
+      { "id": "tickets", "kind": "metric", "label": "Open tickets", "value": "3" },
+      { "id": "tier", "kind": "metric", "label": "Account", "value": "Gold" }
+    ],
+    "actions": [{ "id": "record", "label": "Open record", "url": "https://app.example.com/record/123", "icon": "record", "emphasis": "primary" }],
+    "profiles": {
+      "minimal": { "indicator": "icon" },
+      "compact": { "indicator": "timer" },
+      "expanded": { "itemIds": ["tickets", "tier"], "actionIds": ["record"], "showSubtitle": true }
+    }
+  }
+}
