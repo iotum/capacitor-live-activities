@@ -68,12 +68,22 @@ private struct ActivityPanel: View {
 
     private func content(_ display: LiveActivityDisplay?, itemCount: Int, actionCount: Int, subtitle: Bool) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            if showTitle, let header = display?.header {
-                Text(header).font(.caption.weight(.medium)).opacity(0.75).lineLimit(1)
+            if showTitle, display?.header != nil || display?.status != nil {
+                HStack(spacing: 8) {
+                    if let header = display?.header {
+                        Text(header).opacity(0.75)
+                    }
+                    Spacer(minLength: 4)
+                    if let status = display?.status {
+                        Text(status).foregroundColor(activityAccent(display?.phase))
+                    }
+                }
+                .font(.caption.weight(.medium))
+                .lineLimit(1)
             }
             if showTitle {
                 HStack(alignment: .top) {
-                    ActivityIcon(state: state)
+                    if display == nil || display?.icon != nil { ActivityIcon(state: state) }
                     Text(state.title).font(.title3.weight(.bold)).lineLimit(1)
                     Spacer(minLength: 4)
                     ActivityIndicator(state: state, selection: "timer", iconFallback: false).frame(maxWidth: 72)
@@ -82,7 +92,7 @@ private struct ActivityPanel: View {
             if subtitle, display?.profiles.expanded.showSubtitle != false, let text = state.subtitle {
                 Text(text).font(.caption).lineLimit(1).opacity(0.8)
             }
-            if let status = display?.status {
+            if !showTitle, let status = display?.status {
                 Text(status).font(.caption).lineLimit(1).foregroundColor(activityAccent(display?.phase))
             }
             if display?.template == "progress", let progress = state.progress {
