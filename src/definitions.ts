@@ -33,6 +33,8 @@ export interface LiveActivityDisplay {
     value?: string;
     badge?: string;
     selected?: boolean;
+    /** Pill tint as `#RRGGBB` or `#RRGGBBAA`; the renderer keeps text legible. Ignored if invalid. */
+    color?: string;
   }[];
   actions: {
     id: string;

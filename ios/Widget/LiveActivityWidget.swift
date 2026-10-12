@@ -99,8 +99,9 @@ private struct ActivityPanel: View {
                     .font(.caption)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(activityAccent(display.phase).opacity(item.selected == true ? 0.25 : 0.1), in: RoundedRectangle(cornerRadius: 6))
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(activityAccent(display.phase).opacity(item.selected == true ? 0.7 : 0), lineWidth: 1))
+                    .foregroundColor(pillColor(item.color)?.foreground ?? .white)
+                    .background(pillFill(item, phase: display.phase), in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(pillColor(item.color)?.stroke ?? activityAccent(display.phase).opacity(item.selected == true ? 0.7 : 0), lineWidth: 1))
                     .accessibilityElement(children: .combine)
                     .accessibilityAddTraits(item.selected == true ? .isSelected : [])
                 }
@@ -193,6 +194,30 @@ private func activityAccent(_ phase: String?) -> Color {
     case "ended": return Color(red: 184 / 255.0, green: 192 / 255.0, blue: 204 / 255.0)
     default: return .white
     }
+}
+
+private struct PillColor {
+    let fill: Color
+    let stroke: Color
+    let foreground: Color
+}
+
+// Accepts #RRGGBB or #RRGGBBAA; anything else falls back to the neutral pill.
+private func pillColor(_ hex: String?) -> PillColor? {
+    guard let hex = hex, hex.hasPrefix("#"), [7, 9].contains(hex.count),
+          let value = UInt32(hex.dropFirst().prefix(6), radix: 16) else { return nil }
+    let alpha = hex.count == 9 ? (UInt32(hex.suffix(2), radix: 16) ?? 255) : 255
+    let r = Double((value >> 16) & 0xFF) / 255, g = Double((value >> 8) & 0xFF) / 255, b = Double(value & 0xFF) / 255
+    let a = Double(alpha) / 255
+    // Text contrasts with the colour as blended on the dark card, so a faint tint keeps white text.
+    let luminance = (0.299 * r + 0.587 * g + 0.114 * b) * a
+    return PillColor(fill: Color(red: r, green: g, blue: b).opacity(a),
+                     stroke: Color(red: r, green: g, blue: b).opacity(min(1, a + 0.3)),
+                     foreground: luminance > 0.6 ? .black : .white)
+}
+
+private func pillFill(_ item: LiveActivityDisplay.Item, phase: String?) -> Color {
+    pillColor(item.color)?.fill ?? activityAccent(phase).opacity(item.selected == true ? 0.25 : 0.1)
 }
 
 private func activityURL(_ value: String?) -> URL? {

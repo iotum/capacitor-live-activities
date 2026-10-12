@@ -173,6 +173,7 @@ public struct LiveActivityDisplay: Codable, Hashable {
         public var value: String?
         public var badge: String?
         public var selected: Bool?
+        public var color: String?
     }
 
     public struct Action: Codable, Hashable, Identifiable {

@@ -13,6 +13,7 @@ across both transports. The call fixture exercises the wire contract.
 | `phase: connected` | Green `#65D69A` accent |
 | `phase: ended` | Neutral `#B8C0CC` accent |
 | `header` | Lock-screen card heading / Android notification subtext |
+| item `color` | `#RRGGBB` or `#RRGGBBAA` pill tint; iOS derives border and text contrast, invalid values use the neutral pill |
 | item `selected` | iOS tinted outline and accessibility trait / Android selected label |
 | action `icon` | Semantic `record`, `ticket`, `note`, `open`, mapped to native resources |
 | action `emphasis` | `primary`, `secondary`, `destructive`; defaults to secondary |
