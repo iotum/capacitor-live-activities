@@ -99,21 +99,27 @@ private struct ActivityPanel: View {
                 ProgressView(value: min(max(progress, 0), 1)).tint(activityAccent(display?.phase))
             }
             if let display = display {
-                ForEach(Array(display.selectedItems.prefix(itemCount))) { item in
-                    HStack {
-                        if let badge = item.badge { Text(badge).bold().lineLimit(1) }
-                        Text(item.label).lineLimit(1)
-                        Spacer(minLength: 4)
-                        if let value = item.value { Text(value).bold().lineLimit(1) }
+                PillFlowLayout(spacing: 6) {
+                    ForEach(Array(display.selectedItems.prefix(itemCount))) { item in
+                        HStack(spacing: 6) {
+                            if let badge = item.badge { Text(badge).bold().lineLimit(1) }
+                            Text(item.label).lineLimit(1)
+                            if let value = item.value { Text(value).bold().lineLimit(1) }
+                        }
+                        .font(.caption)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .foregroundColor(pillColor(item.color)?.foreground ?? .white)
+                        .background(pillFill(item, phase: display.phase), in: RoundedRectangle(cornerRadius: 6))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6).stroke(
+                                pillColor(item.color)?.stroke ?? activityAccent(display.phase).opacity(item.selected == true ? 0.7 : 0),
+                                lineWidth: 1
+                            )
+                        )
+                        .accessibilityElement(children: .combine)
+                        .accessibilityAddTraits(item.selected == true ? .isSelected : [])
                     }
-                    .font(.caption)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .foregroundColor(pillColor(item.color)?.foreground ?? .white)
-                    .background(pillFill(item, phase: display.phase), in: RoundedRectangle(cornerRadius: 6))
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(pillColor(item.color)?.stroke ?? activityAccent(display.phase).opacity(item.selected == true ? 0.7 : 0), lineWidth: 1))
-                    .accessibilityElement(children: .combine)
-                    .accessibilityAddTraits(item.selected == true ? .isSelected : [])
                 }
                 HStack(spacing: 12) {
                     ForEach(Array(display.selectedActions.prefix(actionCount))) { action in
@@ -128,6 +134,41 @@ private struct ActivityPanel: View {
             }
         }
         .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+// Wraps children left-to-right onto new rows, like CSS flex-wrap.
+@available(iOSApplicationExtension 16.2, *)
+private struct PillFlowLayout: Layout {
+    var spacing: CGFloat
+
+    private func arrange(_ subviews: Subviews, maxWidth: CGFloat) -> (positions: [CGPoint], size: CGSize) {
+        var positions: [CGPoint] = []
+        var x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0, usedWidth: CGFloat = 0
+        for view in subviews {
+            let size = view.sizeThatFits(ProposedViewSize(width: maxWidth.isFinite ? maxWidth : nil, height: nil))
+            if x > 0, x + size.width > maxWidth {
+                x = 0
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            positions.append(CGPoint(x: x, y: y))
+            x += size.width + spacing
+            usedWidth = max(usedWidth, x - spacing)
+            rowHeight = max(rowHeight, size.height)
+        }
+        return (positions, CGSize(width: usedWidth, height: y + rowHeight))
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        arrange(subviews, maxWidth: proposal.width ?? .infinity).size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let result = arrange(subviews, maxWidth: bounds.width)
+        for (view, point) in zip(subviews, result.positions) {
+            view.place(at: CGPoint(x: bounds.minX + point.x, y: bounds.minY + point.y), proposal: ProposedViewSize(width: bounds.width, height: nil))
+        }
     }
 }
 
