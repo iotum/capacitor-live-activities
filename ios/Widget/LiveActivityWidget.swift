@@ -22,7 +22,7 @@ struct LiveActivityWidget: Widget {
                     ActivityIcon(state: context.state)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    ActivityIndicator(state: context.state, selection: "timer")
+                    ActivityIndicator(state: context.state, selection: "timer", iconFallback: false)
                         .frame(maxWidth: 72)
                 }
                 DynamicIslandExpandedRegion(.center) {
@@ -76,7 +76,7 @@ private struct ActivityPanel: View {
                     ActivityIcon(state: state)
                     Text(state.title).font(.title3.weight(.bold)).lineLimit(1)
                     Spacer(minLength: 4)
-                    ActivityIndicator(state: state, selection: "timer").frame(maxWidth: 72)
+                    ActivityIndicator(state: state, selection: "timer", iconFallback: false).frame(maxWidth: 72)
                 }
             }
             if subtitle, display?.profiles.expanded.showSubtitle != false, let text = state.subtitle {
@@ -136,11 +136,17 @@ private struct ActivityIcon: View {
 private struct ActivityIndicator: View {
     let state: LiveActivityAttributes.ContentState
     let selection: String
+    // The card already shows the icon at its leading edge; the trailing slot stays empty until a timer exists.
+    var iconFallback = true
+
+    @ViewBuilder private var fallback: some View {
+        if iconFallback { ActivityIcon(state: state) }
+    }
 
     var body: some View {
         Group {
             if state.display?.supported != true {
-                ActivityIcon(state: state)
+                fallback
             } else if selection == "timer", let timer = state.display?.timer {
                 if timer.mode == "elapsed", let start = timer.start {
                     Text(Date(timeIntervalSince1970: start), style: .timer)
@@ -149,14 +155,14 @@ private struct ActivityIndicator: View {
                 } else if timer.mode == "frozen", let seconds = timer.seconds {
                     Text(String(format: "%d:%02d", Int(seconds) / 60, Int(seconds) % 60))
                 } else {
-                    ActivityIcon(state: state)
+                    fallback
                 }
             } else if selection == "status", let status = state.display?.status {
                 Text(status)
             } else if selection == "progress", let progress = state.progress {
                 Text(min(max(progress, 0), 1), format: .percent.precision(.fractionLength(0)))
             } else {
-                ActivityIcon(state: state)
+                fallback
             }
         }
         .font(.caption.monospacedDigit())
