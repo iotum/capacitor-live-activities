@@ -1,4 +1,4 @@
-import type { PluginListenerHandle } from '@capacitor/core';
+import type { PermissionState, PluginListenerHandle } from '@capacitor/core';
 
 /**
  * Static data for a Live Activity — set once at creation, never changes.
@@ -130,6 +130,21 @@ export interface LiveActivityState {
   [key: string]: unknown;
 }
 
+export interface ApplyEventOptions {
+  /** Unique lifecycle key. Never reuse a finished key for a new activity. */
+  key: string;
+  event: 'start' | 'update' | 'end';
+  /** Server event time in Unix seconds. Events older than 24 hours are ignored. */
+  timestamp: number;
+  /** Required for start/update; optional final state for end. */
+  state?: LiveActivityState;
+}
+
+export interface ApplyEventResult {
+  status: 'applied' | 'ignored' | 'permission-required';
+  activityId?: string;
+}
+
 export interface StartOptions {
   attributes: LiveActivityAttributes;
   state: LiveActivityState;
@@ -215,6 +230,21 @@ export interface ActivityStateChangedEvent {
 }
 
 export interface LiveActivitiesPlugin {
+  /** Android only. Check notification permission without prompting. */
+  checkPermissions(): Promise<{ notifications: PermissionState }>;
+
+  /** Android only. Request notification permission before retrying an event. */
+  requestPermissions(): Promise<{ notifications: PermissionState }>;
+
+  /**
+   * Android only. Serialize an event and persist its lifecycle across process restarts.
+   * End is terminal, including when it arrives before start. Finished keys are retained
+   * for 24 hours; expired events are rejected after cleanup. Missing activities may be
+   * created by start/update. A creation without notification permission returns
+   * permission-required; request permission and retry the same event.
+   */
+  applyEvent(options: ApplyEventOptions): Promise<ApplyEventResult>;
+
   /**
    * iOS only. Persist an HTTPS token postback URL and the exact WebView origin.
    * Native uploads use fresh WK session cookies, including during background launches.

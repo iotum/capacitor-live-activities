@@ -666,6 +666,47 @@ Your app should handle the incoming FCM data message (via a Firebase `onMessageR
 
 > On Android the OS does not update the notification directly from the push payload — FCM wakes your app, your app calls `update()`. This is by design and means your update logic stays in one place (TypeScript).
 
+#### Persistent lifecycle events
+
+For server-driven lifecycles, use the Android-only `applyEvent` API instead of
+finding an activity and calling `start`, `update`, or `end` separately:
+
+```typescript
+import type { ApplyEventOptions } from '@ciabosoftwaresolutions/capacitor-live-activities';
+
+async function handleLiveActivityEvent(options: ApplyEventOptions) {
+  const result = await LiveActivities.applyEvent(options);
+  if (result.status === 'permission-required') {
+    const permission = await LiveActivities.requestPermissions();
+    if (permission.notifications === 'granted') {
+      await LiveActivities.applyEvent(options);
+    }
+  }
+}
+```
+
+Pass the server event unchanged, including its original Unix-second `timestamp`.
+Do not replace the timestamp with the device time on delivery or retry.
+
+Use a unique key for every lifecycle and never reuse a finished key. An `end`
+records completion even if no activity exists; delayed starts or updates for that
+key are ignored. Start and update can both create an activity if it has not ended.
+Only creation requires notification permission, and a permission retry rechecks
+whether an end arrived while the prompt was open.
+
+Android serializes lifecycle operations and synchronously persists IDs and finished
+markers in SharedPreferences before changing notifications. After a process restart,
+existing notifications retain their identity; missing notifications are marked
+finished rather than recreated. Finished keys are retained for 24 hours and events
+older than 24 hours are rejected after cleanup. Retention must exceed the server's
+delivery/retry window. Clearing app data removes this history.
+
+Older timestamps are ignored while an activity runs, but same-second updates are
+accepted and may arrive out of order. End is terminal regardless of its timestamp
+relative to an active update. The host must route FCM events to the plugin; the
+plugin does not install a Firebase messaging service. A JavaScript handler still
+requires a running WebView. iOS continues to use ActivityKit/APNs.
+
 ---
 
 ## Customising the iOS Widget UI
@@ -786,6 +827,9 @@ The **compact** presentation (the small pill around the camera) is deliberately 
 
 <docgen-index>
 
+* [`checkPermissions()`](#checkpermissions)
+* [`requestPermissions()`](#requestpermissions)
+* [`applyEvent(...)`](#applyevent)
 * [`configureTokenUpload(...)`](#configuretokenupload)
 * [`resetTokenUpload()`](#resettokenupload)
 * [`isSupported()`](#issupported)
@@ -799,11 +843,59 @@ The **compact** presentation (the small pill around the camera) is deliberately 
 * [`addListener('activityStateChanged' | 'pushTokenUpdated' | 'pushToStartTokenUpdated', ...)`](#addlisteneractivitystatechanged--pushtokenupdated--pushtostarttokenupdated-)
 * [`removeAllListeners()`](#removealllisteners)
 * [Interfaces](#interfaces)
+* [Type Aliases](#type-aliases)
 
 </docgen-index>
 
 <docgen-api>
 <!--Update the source file JSDoc comments and rerun docgen to update the docs below-->
+
+### checkPermissions()
+
+```typescript
+checkPermissions() => any
+```
+
+Android only. Check notification permission without prompting.
+
+**Returns:** <code>any</code>
+
+--------------------
+
+
+### requestPermissions()
+
+```typescript
+requestPermissions() => any
+```
+
+Android only. Request notification permission before retrying an event.
+
+**Returns:** <code>any</code>
+
+--------------------
+
+
+### applyEvent(...)
+
+```typescript
+applyEvent(options: ApplyEventOptions) => any
+```
+
+Android only. Serialize an event and persist its lifecycle across process restarts.
+End is terminal, including when it arrives before start. Finished keys are retained
+for 24 hours; expired events are rejected after cleanup. Missing activities may be
+created by start/update. A creation without notification permission returns
+permission-required; request permission and retry the same event.
+
+| Param         | Type                                                            |
+| ------------- | --------------------------------------------------------------- |
+| **`options`** | <code><a href="#applyeventoptions">ApplyEventOptions</a></code> |
+
+**Returns:** <code>any</code>
+
+--------------------
+
 
 ### configureTokenUpload(...)
 
@@ -1027,23 +1119,14 @@ removeAllListeners() => any
 ### Interfaces
 
 
-#### StartOptions
+#### ApplyEventOptions
 
-| Prop                    | Type                                                                      | Description                                                                                                                 |
-| ----------------------- | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| **`attributes`**        | <code><a href="#liveactivityattributes">LiveActivityAttributes</a></code> |                                                                                                                             |
-| **`state`**             | <code><a href="#liveactivitystate">LiveActivityState</a></code>           |                                                                                                                             |
-| **`staleAfterSeconds`** | <code>number</code>                                                       | iOS only — how long (seconds) the activity stays visible after `end()`. Defaults to 0 (dismissed immediately). Max 4 hours. |
-
-
-#### LiveActivityAttributes
-
-Static data for a Live Activity — set once at creation, never changes.
-Keep this small; use `state` for anything that updates.
-
-| Prop               | Type                | Description                                                                 |
-| ------------------ | ------------------- | --------------------------------------------------------------------------- |
-| **`activityType`** | <code>string</code> | Unique identifier you assign (e.g. "order-123"). Used to correlate updates. |
+| Prop            | Type                                                            | Description                                                                |
+| --------------- | --------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| **`key`**       | <code>string</code>                                             | Unique lifecycle key. Never reuse a finished key for a new activity.       |
+| **`event`**     | <code>'start' \| 'update' \| 'end'</code>                       |                                                                            |
+| **`timestamp`** | <code>number</code>                                             | Server event time in Unix seconds. Events older than 24 hours are ignored. |
+| **`state`**     | <code><a href="#liveactivitystate">LiveActivityState</a></code> | Required for start/update; optional final state for end.                   |
 
 
 #### LiveActivityState
@@ -1051,7 +1134,7 @@ Keep this small; use `state` for anything that updates.
 | Prop                    | Type                                                                | Description                                                                                                                                                                                                                                                                                                                                            |
 | ----------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **`title`**             | <code>string</code>                                                 | Primary headline shown on the Lock Screen / Dynamic Island.                                                                                                                                                                                                                                                                                            |
-| **`display`**           | <code><a href="#liveactivitydisplay">LiveActivityDisplay</a></code> | iOS widget display contract. Requires the supplied widget template in the host extension.                                                                                                                                                                                                                                                              |
+| **`display`**           | <code><a href="#liveactivitydisplay">LiveActivityDisplay</a></code> | Shared iOS/Android display contract. Rails selects content; native code adapts layout.                                                                                                                                                                                                                                                                 |
 | **`subtitle`**          | <code>string</code>                                                 | Secondary line of text.                                                                                                                                                                                                                                                                                                                                |
 | **`progress`**          | <code>number</code>                                                 | Optional progress value between 0.0 and 1.0.                                                                                                                                                                                                                                                                                                           |
 | **`icon`**              | <code>string</code>                                                 | Optional SF Symbol name (iOS) or Android drawable name for a status icon.                                                                                                                                                                                                                                                                              |
@@ -1071,14 +1154,46 @@ Keep this small; use `state` for anything that updates.
 
 Dynamic data for a Live Activity — can be pushed via `update()` at any time.
 
-| Prop           | Type                | Description                                                             |
-| -------------- | ------------------- | ----------------------------------------------------------------------- |
-| **`version`**  | <code>1</code>      |                                                                         |
-| **`status`**   | <code>string</code> |                                                                         |
-| **`header`**   | <code>string</code> | Small line above the title; enables the card layout on the Lock Screen. |
-| **`url`**      | <code>string</code> |                                                                         |
-| **`sections`** | <code>{}</code>     |                                                                         |
-| **`actions`**  | <code>{}</code>     |                                                                         |
+| Prop           | Type                                                                                                                                                                                                                           | Description                                                     |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------- |
+| **`version`**  | <code>2</code>                                                                                                                                                                                                                 |                                                                 |
+| **`template`** | <code>'summary' \| 'progress'</code>                                                                                                                                                                                           |                                                                 |
+| **`status`**   | <code>string</code>                                                                                                                                                                                                            |                                                                 |
+| **`header`**   | <code>string</code>                                                                                                                                                                                                            |                                                                 |
+| **`phase`**    | <code>'ringing' \| 'connected' \| 'ended'</code>                                                                                                                                                                               | Shared accent token; native renderers choose accessible colors. |
+| **`icon`**     | <code>'info' \| 'call' \| 'delivery' \| 'check'</code>                                                                                                                                                                         | Semantic icon mapped to bundled native resources.               |
+| **`url`**      | <code>string</code>                                                                                                                                                                                                            |                                                                 |
+| **`timer`**    | <code>{ mode: 'elapsed'; start: number; } \| { mode: 'countdown'; end: number; start?: number; } \| { mode: 'frozen'; seconds: number; }</code>                                                                                | Unix seconds on every transport, including APNs.                |
+| **`items`**    | <code>{}</code>                                                                                                                                                                                                                |                                                                 |
+| **`actions`**  | <code>{}</code>                                                                                                                                                                                                                |                                                                 |
+| **`profiles`** | <code>{ minimal: { indicator: 'progress' \| 'icon' \| 'timer' \| 'status'; }; compact: { indicator: 'progress' \| 'icon' \| 'timer' \| 'status'; }; expanded: { itemIds: {}; actionIds: {}; showSubtitle: boolean; }; }</code> |                                                                 |
+
+
+#### ApplyEventResult
+
+| Prop             | Type                                                         |
+| ---------------- | ------------------------------------------------------------ |
+| **`status`**     | <code>'applied' \| 'ignored' \| 'permission-required'</code> |
+| **`activityId`** | <code>string</code>                                          |
+
+
+#### StartOptions
+
+| Prop                    | Type                                                                      | Description                                                                                                                 |
+| ----------------------- | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| **`attributes`**        | <code><a href="#liveactivityattributes">LiveActivityAttributes</a></code> |                                                                                                                             |
+| **`state`**             | <code><a href="#liveactivitystate">LiveActivityState</a></code>           |                                                                                                                             |
+| **`staleAfterSeconds`** | <code>number</code>                                                       | iOS only — how long (seconds) the activity stays visible after `end()`. Defaults to 0 (dismissed immediately). Max 4 hours. |
+
+
+#### LiveActivityAttributes
+
+Static data for a Live Activity — set once at creation, never changes.
+Keep this small; use `state` for anything that updates.
+
+| Prop               | Type                | Description                                                                 |
+| ------------------ | ------------------- | --------------------------------------------------------------------------- |
+| **`activityType`** | <code>string</code> | Unique identifier you assign (e.g. "order-123"). Used to correlate updates. |
 
 
 #### UpdateOptions
@@ -1106,7 +1221,7 @@ Dynamic data for a Live Activity — can be pushed via `update()` at any time.
 | ------------------ | ----------------------------------------------- | ------------------------------------------------------------------------------ |
 | **`activityId`**   | <code>string</code>                             |                                                                                |
 | **`activityType`** | <code>string</code>                             |                                                                                |
-| **`state`**        | <code>'active' \| 'ended' \| 'dismissed'</code> | 'active' \| 'ended' \| 'dismissed' — iOS only; Android always returns 'active' |
+| **`state`**        | <code>'ended' \| 'active' \| 'dismissed'</code> | 'active' \| 'ended' \| 'dismissed' — iOS only; Android always returns 'active' |
 | **`pushToken`**    | <code>string</code>                             | iOS only — per-activity APNs update token, once issued                         |
 
 
@@ -1123,7 +1238,7 @@ Dynamic data for a Live Activity — can be pushed via `update()` at any time.
 | Prop                | Type                                            | Description               |
 | ------------------- | ----------------------------------------------- | ------------------------- |
 | **`activityId`**    | <code>string</code>                             |                           |
-| **`activityState`** | <code>'active' \| 'ended' \| 'dismissed'</code> | New state of the activity |
+| **`activityState`** | <code>'ended' \| 'active' \| 'dismissed'</code> | New state of the activity |
 
 
 #### PushTokenUpdatedEvent
@@ -1148,6 +1263,14 @@ Dynamic data for a Live Activity — can be pushed via `update()` at any time.
 | Prop         | Type                      |
 | ------------ | ------------------------- |
 | **`remove`** | <code>() =&gt; any</code> |
+
+
+### Type Aliases
+
+
+#### PermissionState
+
+<code>'prompt' | 'prompt-with-rationale' | 'granted' | 'denied'</code>
 
 </docgen-api>
 

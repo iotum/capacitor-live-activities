@@ -13,15 +13,6 @@ import android.net.Uri
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.getcapacitor.JSObject
-import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
-
-data class ActivityInfo(
-    val activityId: String,
-    val activityType: String,
-    val state: String,
-    val notificationId: Int,
-)
 
 class LiveActivitiesManager(private val context: Context) {
 
@@ -30,12 +21,23 @@ class LiveActivitiesManager(private val context: Context) {
         private const val CHANNEL_NAME = "Live Activities"
     }
 
-    private val activities = ConcurrentHashMap<String, ActivityInfo>()
     private val notificationManager =
         context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    private val preferences = context.getSharedPreferences("live_activity_lifecycle_v1", Context.MODE_PRIVATE)
+    private val lifecycle = ActivityLifecycle(
+        load = { preferences.getString("entries", null) },
+        save = { stored ->
+            check(preferences.edit().putString("entries", stored).commit()) { "Failed to persist Live Activity lifecycle" }
+        },
+        show = { info, state, ongoing ->
+            notificationManager.notify(info.activityId, info.notificationId, buildNotification(JSObject(state.toString()), ongoing))
+        },
+        cancel = { info -> notificationManager.cancel(info.activityId, info.notificationId) },
+    )
 
     init {
         ensureChannel()
+        lifecycle.reconcile(notificationManager.activeNotifications.mapNotNull { it.tag }.toSet())
     }
 
     // -------------------------------------------------------------------------
@@ -43,47 +45,27 @@ class LiveActivitiesManager(private val context: Context) {
     // -------------------------------------------------------------------------
 
     fun start(attributes: JSObject, state: JSObject): String {
-        val activityId = UUID.randomUUID().toString()
-        val notificationId = activityId.hashCode()
         val activityType = attributes.optString("activityType", "activity")
-
-        val notification = buildNotification(state, ongoing = true)
-        notificationManager.notify(notificationId, notification)
-
-        activities[activityId] = ActivityInfo(
-            activityId = activityId,
-            activityType = activityType,
-            state = "active",
-            notificationId = notificationId,
-        )
-
-        return activityId
+        val result = applyEvent("start", activityType, state, System.currentTimeMillis() / 1000, true)
+        return result.activityId ?: throw IllegalArgumentException("Live Activity key is already finished: $activityType")
     }
 
     fun update(activityId: String, state: JSObject) {
-        val info = activities[activityId]
+        val info = lifecycle.activeActivities().find { it.activityId == activityId }
             ?: throw IllegalArgumentException("No active Live Activity with id: $activityId")
-
-        val notification = buildNotification(state, ongoing = true)
-        notificationManager.notify(info.notificationId, notification)
+        applyEvent("update", info.activityType, state, System.currentTimeMillis() / 1000, true)
     }
 
     fun end(activityId: String, finalState: JSObject?) {
-        val info = activities[activityId]
+        val info = lifecycle.activeActivities().find { it.activityId == activityId }
             ?: throw IllegalArgumentException("No active Live Activity with id: $activityId")
-
-        if (finalState != null) {
-            // Show final state briefly as a non-ongoing notification, then cancel
-            val finalNotification = buildNotification(finalState, ongoing = false)
-            notificationManager.notify(info.notificationId, finalNotification)
-        } else {
-            notificationManager.cancel(info.notificationId)
-        }
-
-        activities.remove(activityId)
+        applyEvent("end", info.activityType, finalState, System.currentTimeMillis() / 1000, false)
     }
 
-    fun getActiveActivities(): List<ActivityInfo> = activities.values.toList()
+    fun applyEvent(event: String, key: String, state: JSObject?, timestamp: Long, canStart: Boolean): ActivityEventResult =
+        lifecycle.apply(event, key, state, timestamp, canStart)
+
+    fun getActiveActivities(): List<ActivityInfo> = lifecycle.activeActivities()
 
     /**
      * Returns the FCM registration token if Firebase Messaging is present in

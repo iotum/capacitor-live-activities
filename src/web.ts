@@ -1,6 +1,9 @@
 import { WebPlugin } from '@capacitor/core';
+import type { PermissionState, PluginListenerHandle } from '@capacitor/core';
 
 import type {
+  ApplyEventOptions,
+  ApplyEventResult,
   ActivityInfo,
   ActivityStateChangedEvent,
   EndOptions,
@@ -11,9 +14,21 @@ import type {
   StartOptions,
   UpdateOptions,
 } from './definitions';
-import type { PluginListenerHandle } from '@capacitor/core';
 
 export class LiveActivitiesWeb extends WebPlugin implements LiveActivitiesPlugin {
+  async checkPermissions(): Promise<{ notifications: PermissionState }> {
+    return { notifications: 'denied' };
+  }
+
+  async requestPermissions(): Promise<{ notifications: PermissionState }> {
+    return { notifications: 'denied' };
+  }
+
+  async applyEvent(_options: ApplyEventOptions): Promise<ApplyEventResult> {
+    void _options;
+    throw this.unimplemented('Native event handling is only supported on Android.');
+  }
+
   async configureTokenUpload(_options: { url: string; origin: string }): Promise<void> {
     throw this.unimplemented('Native token uploads are only supported on iOS.');
   }
@@ -60,8 +75,10 @@ export class LiveActivitiesWeb extends WebPlugin implements LiveActivitiesPlugin
       event: ActivityStateChangedEvent | PushTokenUpdatedEvent | PushToStartTokenUpdatedEvent,
     ) => void,
   ): Promise<PluginListenerHandle> {
-    return { remove: async () => {} };
+    return { remove: async () => undefined };
   }
 
-  async removeAllListeners(): Promise<void> {}
+  async removeAllListeners(): Promise<void> {
+    return undefined;
+  }
 }

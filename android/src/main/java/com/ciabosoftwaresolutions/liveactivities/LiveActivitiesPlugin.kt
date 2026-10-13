@@ -86,6 +86,26 @@ class LiveActivitiesPlugin : Plugin() {
     }
 
     @PluginMethod
+    fun applyEvent(call: PluginCall) {
+        val event = call.getString("event")
+        val key = call.getString("key")
+        val timestamp = call.getLong("timestamp")
+        if (event == null || key == null || timestamp == null) {
+            call.reject("Missing required options: event, key and timestamp")
+            return
+        }
+        try {
+            val applied = manager.applyEvent(event, key, call.getObject("state"), timestamp, getNotificationPermissionState() == "granted")
+            val result = JSObject()
+            result.put("status", applied.status)
+            applied.activityId?.let { result.put("activityId", it) }
+            call.resolve(result)
+        } catch (e: Exception) {
+            call.reject(e.message ?: "Failed to apply Live Activity event")
+        }
+    }
+
+    @PluginMethod
     fun start(call: PluginCall) {
         val attributes = call.getObject("attributes")
         val state = call.getObject("state")
